@@ -1,0 +1,474 @@
+[
+ {
+  "id": "mt4tab",
+  "type": "tab",
+  "label": "Connect everything",
+  "info": "Task 4: brings sensors (MQTT), BMS air machines (MQTT via BACnet gateway) and CAFM repair logbook (REST API) together, matches their different names to one room ID, and publishes one view per room."
+ },
+ {
+  "id": "mt2broker",
+  "type": "mqtt-broker",
+  "name": "Local broker",
+  "broker": "localhost",
+  "port": "1883",
+  "clientid": "",
+  "autoConnect": true,
+  "usetls": false,
+  "protocolVersion": "4",
+  "keepalive": "60",
+  "cleansession": true
+ },
+ {
+  "id": "mt4c0",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "1. The name-matching table (runs once at start)",
+  "info": "Every system calls the same room something different. This table lists all the names for each room and picks one official ID (room1..room6).",
+  "x": 230,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "mt4i0",
+  "type": "inject",
+  "z": "mt4tab",
+  "name": "on start",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "0.1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 80,
+  "wires": [
+   [
+    "mt4map"
+   ]
+  ]
+ },
+ {
+  "id": "mt4map",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "Name-matching table",
+  "func": "// THE NAME-MATCHING TABLE (also called a \"crosswalk\" or \"asset register\").\n// Each row says: these different names, in three different systems,\n// all mean the SAME room. We use the sensor names (room1..room6) as the\n// one official ID, and translate everything else into it.\nconst rooms = [\n  { id: \"room1\", name: \"Reception\",      sensor: \"room1\", bms: \"AHU-L1-RCP\", cafm_location: \"FLR1-001\", cafm_name: \"Front Desk Area\",  cafm_ahu_asset: \"AST-1001\" },\n  { id: \"room2\", name: \"Open Office\",    sensor: \"room2\", bms: \"AHU-L1-OPN\", cafm_location: \"FLR1-002\", cafm_name: \"Open Plan Office\", cafm_ahu_asset: \"AST-1002\" },\n  { id: \"room3\", name: \"Meeting Room\",   sensor: \"room3\", bms: \"AHU-L1-MTG\", cafm_location: \"FLR1-003\", cafm_name: \"Meeting Rm 01\",    cafm_ahu_asset: \"AST-1003\" },\n  { id: \"room4\", name: \"Kitchen\",        sensor: \"room4\", bms: \"AHU-L1-KIT\", cafm_location: \"FLR1-004\", cafm_name: \"Staff Kitchen\",    cafm_ahu_asset: \"AST-1004\" },\n  { id: \"room5\", name: \"Manager Office\", sensor: \"room5\", bms: \"AHU-L1-MGR\", cafm_location: \"FLR1-005\", cafm_name: \"Mgr Office\",       cafm_ahu_asset: \"AST-1005\" },\n  { id: \"room6\", name: \"Quiet Room\",     sensor: \"room6\", bms: \"AHU-L1-QUI\", cafm_location: \"FLR1-006\", cafm_name: \"Focus Pod\",        cafm_ahu_asset: \"AST-1006\" }\n];\n\n// Quick look-up lists, like the index at the back of a book:\n// \"AHU-L1-MTG? -> room3\", \"FLR1-003? -> room3\", and so on.\nconst map = { rooms: {}, bySensor: {}, byBms: {}, byLocation: {} };\nconst twin = {};\nfor (const r of rooms) {\n  map.rooms[r.id] = r;\n  map.bySensor[r.sensor] = r.id;\n  map.byBms[r.bms] = r.id;\n  map.byLocation[r.cafm_location] = r.id;\n\n  // An empty \"folder\" for each room, filled in by the lanes below\n  twin[r.id] = {\n    id: r.id,\n    name: r.name,\n    ids: { sensor: r.sensor, bms: r.bms, cafm_location: r.cafm_location,\n           cafm_name: r.cafm_name, cafm_ahu_asset: r.cafm_ahu_asset },\n    summary: {},\n    sensors: {},\n    ahu: { id: r.bms },\n    assets: [],\n    tickets: { open: [], history: [] },\n    alert: { level: \"unknown\", message: \"Waiting for data\", reasons: [] }\n  };\n}\n\nflow.set(\"map\", map);\nflow.set(\"twin\", twin);\nflow.set(\"lastSeen\", { sensors: null, bms: null, cafm: null, cafm_error: null });\nnode.status({ fill: \"green\", shape: \"dot\", text: rooms.length + \" rooms mapped\" });\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 360,
+  "y": 80,
+  "wires": []
+ },
+ {
+  "id": "mt4c1",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "2. Room sensors in (MQTT)",
+  "info": "",
+  "x": 160,
+  "y": 140,
+  "wires": []
+ },
+ {
+  "id": "mt4sin",
+  "type": "mqtt in",
+  "z": "mt4tab",
+  "name": "Room sensors",
+  "topic": "building/floor1/+/+",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "mt2broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 150,
+  "y": 180,
+  "wires": [
+   [
+    "mt4sfn"
+   ]
+  ]
+ },
+ {
+  "id": "mt4sfn",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "Sensor names -> room ID",
+  "func": "// A room sensor reading arrived, e.g. {\"room\":\"room3\",\"sensor\":\"temperature\",\"value\":24.1,...}\nconst map = flow.get(\"map\");\nconst twin = flow.get(\"twin\");\nconst p = msg.payload;\nif (!map || !twin || !p || typeof p !== \"object\") return null;\n\nconst sensorName = p.room || msg.topic.split(\"/\")[2];\nconst roomId = map.bySensor[sensorName];\nif (!roomId) {\n  node.warn(\"No match in the name table for sensor room: \" + sensorName);\n  return null;\n}\n\ntwin[roomId].sensors[p.sensor] = { value: p.value, unit: p.unit, time: p.time };\ntwin[roomId].sensors_received = Date.now();\nflow.get(\"lastSeen\").sensors = Date.now();\nnode.status({ fill: \"green\", shape: \"dot\", text: sensorName + \" -> \" + roomId });\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 400,
+  "y": 180,
+  "wires": []
+ },
+ {
+  "id": "mt4c2",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "3. Air machines in (BMS via BACnet gateway, MQTT)",
+  "info": "",
+  "x": 240,
+  "y": 240,
+  "wires": []
+ },
+ {
+  "id": "mt4bin",
+  "type": "mqtt in",
+  "z": "mt4tab",
+  "name": "Air machines (BMS)",
+  "topic": "bms/+/+",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "mt2broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 160,
+  "y": 280,
+  "wires": [
+   [
+    "mt4bfn"
+   ]
+  ]
+ },
+ {
+  "id": "mt4bfn",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "BMS names -> room ID",
+  "func": "// An air machine (AHU) reading arrived from the BMS gateway,\n// e.g. topic bms/AHU-L1-MTG/Status, payload {\"device\":\"AHU-L1-MTG\",\"point\":\"Status\",\"value\":\"Fault\",...}\nconst map = flow.get(\"map\");\nconst twin = flow.get(\"twin\");\nconst p = msg.payload;\nif (!map || !twin || !p || typeof p !== \"object\") return null;\n\nconst roomId = map.byBms[p.device];\nif (!roomId) {\n  node.warn(\"No match in the name table for BMS device: \" + p.device);\n  return null;\n}\n\n// Friendlier names for the five BMS points\nconst POINTS = { Status: \"status\", SupplyTemp: \"supply_temp\", Setpoint: \"setpoint\",\n                 FanSpeed: \"fan_speed\", Alarm: \"alarm\" };\nconst ahu = twin[roomId].ahu;\nahu[POINTS[p.point] || p.point] = p.value;\nahu.received = Date.now();\nflow.get(\"lastSeen\").bms = Date.now();\nnode.status({ fill: \"green\", shape: \"dot\", text: p.device + \" -> \" + roomId });\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 400,
+  "y": 280,
+  "wires": []
+ },
+ {
+  "id": "mt4c3",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "4. Repair logbook in (CAFM web API, asked every 15 s)",
+  "info": "",
+  "x": 250,
+  "y": 340,
+  "wires": []
+ },
+ {
+  "id": "mt4i1",
+  "type": "inject",
+  "z": "mt4tab",
+  "name": "every 15 s",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "15",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "3",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 150,
+  "y": 380,
+  "wires": [
+   [
+    "mt4h1"
+   ]
+  ]
+ },
+ {
+  "id": "mt4h1",
+  "type": "http request",
+  "z": "mt4tab",
+  "name": "GET CAFM assets",
+  "method": "GET",
+  "ret": "obj",
+  "paytoqs": "ignore",
+  "url": "http://localhost:8000/api/assets",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 340,
+  "y": 380,
+  "wires": [
+   [
+    "mt4keep"
+   ]
+  ]
+ },
+ {
+  "id": "mt4keep",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "keep assets",
+  "func": "// Keep the asset list safe, then ask the CAFM for the tickets.\n// We start a brand-new message on purpose: the old one carries the\n// CAFM's reply headers, which would confuse the next request.\nreturn { assets: msg.payload, assetsStatus: msg.statusCode };\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 530,
+  "y": 380,
+  "wires": [
+   [
+    "mt4h2"
+   ]
+  ]
+ },
+ {
+  "id": "mt4h2",
+  "type": "http request",
+  "z": "mt4tab",
+  "name": "GET CAFM tickets",
+  "method": "GET",
+  "ret": "obj",
+  "paytoqs": "ignore",
+  "url": "http://localhost:8000/api/tickets",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 720,
+  "y": 380,
+  "wires": [
+   [
+    "mt4cfn"
+   ]
+  ]
+ },
+ {
+  "id": "mt4cfn",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "CAFM names -> room ID",
+  "func": "// We now have both CAFM lists: msg.assets (equipment) and msg.payload (tickets).\n// The CAFM never says \"room3\". It says \"FLR1-003\" and \"AST-1003\".\n// So we join in two steps:  ticket -> asset -> location code -> our room.\nconst map = flow.get(\"map\");\nconst twin = flow.get(\"twin\");\nconst lastSeen = flow.get(\"lastSeen\");\nif (!map || !twin) return null;\n\nconst assets = msg.assets;\nconst tickets = msg.payload;\nif (!Array.isArray(assets) || !Array.isArray(tickets)) {\n  lastSeen.cafm_error = \"CAFM not reachable on localhost:8000\";\n  node.status({ fill: \"red\", shape: \"ring\", text: \"CAFM not reachable\" });\n  return null;\n}\n\n// Step 1: which room is each asset in?\nconst roomOfAsset = {};\nconst assetById = {};\nconst unmatched = [];\nconst newAssets = {};\nfor (const id in twin) newAssets[id] = [];\nfor (const a of assets) {\n  const roomId = map.byLocation[a.location_code];\n  if (!roomId) { unmatched.push(a.asset_id); continue; }\n  roomOfAsset[a.asset_id] = roomId;\n  assetById[a.asset_id] = a;\n  newAssets[roomId].push({\n    asset_id: a.asset_id, description: a.description, category: a.category,\n    model: a.model, installed: a.installed, last_service: a.last_service,\n    next_service: a.next_service, condition: a.condition,\n    serves_room_air: a.asset_id === map.rooms[roomId].cafm_ahu_asset\n  });\n}\n\n// Step 2: which room is each ticket for (via its asset)?\nconst newTickets = {};\nfor (const id in twin) newTickets[id] = { open: [], history: [] };\nfor (const t of tickets) {\n  const roomId = roomOfAsset[t.asset_id];\n  if (!roomId) continue;\n  const item = {\n    ticket_id: t.ticket_id, asset_id: t.asset_id,\n    asset: assetById[t.asset_id].description, type: t.type, priority: t.priority,\n    title: t.title, status: t.status, reported_by: t.reported_by,\n    assigned_to: t.assigned_to, opened: t.opened, closed: t.closed,\n    resolution: t.resolution\n  };\n  if (String(t.status).toLowerCase() === \"open\") newTickets[roomId].open.push(item);\n  else newTickets[roomId].history.push(item);\n}\n\n// Step 3: file everything into each room's folder (newest first)\nfor (const id in twin) {\n  newTickets[id].history.sort((a, b) => String(b.opened).localeCompare(String(a.opened)));\n  twin[id].assets = newAssets[id];\n  twin[id].tickets = newTickets[id];\n}\n\nlastSeen.cafm = Date.now();\nlastSeen.cafm_error = null;\nconst openCount = tickets.filter(t => String(t.status).toLowerCase() === \"open\").length;\nlet text = assets.length + \" assets, \" + openCount + \" open tickets matched\";\nif (unmatched.length) text += \" (\" + unmatched.length + \" unmatched)\";\nnode.status({ fill: unmatched.length ? \"yellow\" : \"green\", shape: \"dot\", text: text });\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 940,
+  "y": 380,
+  "wires": []
+ },
+ {
+  "id": "mt4c4",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "5. Every 5 s: one view per room + alert rule -> MQTT twin/roomN",
+  "info": "",
+  "x": 280,
+  "y": 440,
+  "wires": []
+ },
+ {
+  "id": "mt4i2",
+  "type": "inject",
+  "z": "mt4tab",
+  "name": "every 5 s",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "5",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "5",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 480,
+  "wires": [
+   [
+    "mt4build"
+   ]
+  ]
+ },
+ {
+  "id": "mt4build",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "Build room views + alerts",
+  "func": "// Every 5 seconds: tidy each room into one simple summary, check the\n// alert rule, then publish  twin/room1 ... twin/room6  on MQTT.\nconst twin = flow.get(\"twin\");\nconst lastSeen = flow.get(\"lastSeen\");\nif (!twin) return null;\n\n// ---- Settings you can change ----\nconst HOT = 25;          // °C: above this a room counts as \"hot\"\nconst CO2_HIGH = 1000;   // ppm: above this the air is \"stuffy\"\nconst STALE_MS = 30000;  // no news for 30 s = that source has gone quiet\n// ---------------------------------\n\nconst now = Date.now();\nfunction health(ts, maxAge) {\n  if (!ts) return \"waiting\";\n  return now - ts < maxAge ? \"ok\" : \"stale\";\n}\nflow.set(\"health\", {\n  sensors: health(lastSeen.sensors, STALE_MS),\n  bms: health(lastSeen.bms, STALE_MS),\n  cafm: lastSeen.cafm_error ? \"offline\" : health(lastSeen.cafm, 60000)\n});\n\nconst previous = context.get(\"previous\") || {};\nconst roomMsgs = [];\nconst alertMsgs = [];\nlet alarms = 0, warnings = 0;\n\nfor (const r of Object.values(twin)) {\n  const s = r.sensors;\n  const temp = s.temperature ? s.temperature.value : null;\n  const co2 = s.co2 ? s.co2.value : null;\n  const people = s.occupancy ? s.occupancy.value : null;\n  const ahuStatus = r.ahu.status || null;\n  const fresh = r.sensors_received && now - r.sensors_received < STALE_MS;\n\n  r.summary = {\n    temperature: temp, co2: co2, occupancy: people,\n    ahu_status: ahuStatus, ahu_setpoint: r.ahu.setpoint ?? null,\n    ahu_fan_speed: r.ahu.fan_speed ?? null, ahu_alarm: r.ahu.alarm || null,\n    open_tickets: r.tickets.open.length, data_fresh: !!fresh\n  };\n\n  // ---- THE ALERT RULE: combine all three sources ----\n  const hot = temp !== null && temp > HOT;\n  const fault = ahuStatus === \"Fault\";\n  const stuffy = co2 !== null && co2 > CO2_HIGH;\n  // Tickets for this room's air machine: \"Reactive\" = someone reported a problem,\n  // \"Planned\" = scheduled work (e.g. an overdue service that may explain the fault)\n  const ahuOpen = r.tickets.open.filter(t => t.asset_id === r.ids.cafm_ahu_asset);\n  const ahuTickets = ahuOpen.filter(t => t.type === \"Reactive\");\n  const plannedTickets = ahuOpen.filter(t => t.type !== \"Reactive\");\n  const ticketText = ahuTickets.map(t => \"#\" + t.ticket_id + \" \" + t.title).join(\"; \");\n  const plannedText = plannedTickets.map(t => \"#\" + t.ticket_id + \" \" + t.title).join(\"; \");\n\n  const reasons = [];\n  if (hot) reasons.push(\"Temperature \" + temp + \" °C is above \" + HOT + \" °C\");\n  if (fault) reasons.push(\"Air machine \" + r.ids.bms + \" is in Fault: \" + (r.ahu.alarm || \"no alarm text\"));\n  if (stuffy) reasons.push(\"CO2 \" + co2 + \" ppm is above \" + CO2_HIGH + \" ppm\");\n  if (ahuTickets.length) reasons.push(\"Problem already reported: \" + ticketText);\n  if (plannedText && (hot || fault)) reasons.push(\"Planned work still open on this air machine: \" + plannedText);\n\n  let level, message;\n  if (temp === null) {\n    level = \"unknown\"; message = \"No sensor data yet\";\n  } else if (hot && fault) {\n    level = \"alarm\";\n    message = r.name + \" is overheating because its air machine \" + r.ids.bms + \" has failed (\" +\n      (r.ahu.alarm || \"fault\") + \"). \" +\n      (ahuTickets.length ? \"Already logged as ticket \" + ticketText + \".\"\n                         : \"No repair ticket is open yet: one should be raised.\");\n  } else if (fault) {\n    level = \"warning\";\n    message = \"Air machine \" + r.ids.bms + \" has failed (\" + (r.ahu.alarm || \"fault\") +\n      \") but \" + r.name + \" is not hot yet.\";\n  } else if (hot) {\n    level = \"warning\"; message = r.name + \" is warm, but its air machine looks OK.\";\n  } else if (stuffy) {\n    level = \"warning\"; message = r.name + \" air is stuffy (CO2 \" + co2 + \" ppm).\";\n  } else {\n    level = \"ok\"; message = \"All normal.\";\n  }\n  r.alert = { level: level, message: message, reasons: reasons, ticket_logged: ahuTickets.length > 0 };\n  r.updated = new Date(now).toISOString();\n  if (level === \"alarm\") alarms++;\n  if (level === \"warning\") warnings++;\n\n  roomMsgs.push({ topic: \"twin/\" + r.id, payload: r, retain: true });\n\n  // Only announce an alert when it CHANGES, so we don't shout every 5 seconds\n  const key = level + \"|\" + r.alert.ticket_logged + \"|\" + (fault ? \"F\" : \"\") + (hot ? \"H\" : \"\") + (stuffy ? \"S\" : \"\");\n  if (previous[r.id] !== key) {\n    const firstLook = previous[r.id] === undefined;\n    previous[r.id] = key;\n    // (no need to announce \"all normal\" the very first time we see a room)\n    if (level !== \"unknown\" && !(firstLook && level === \"ok\")) {\n      alertMsgs.push({ topic: \"twin/alerts\", retain: false,\n        payload: { room: r.id, name: r.name, level: level, message: message,\n                   reasons: reasons, time: r.updated } });\n    }\n  }\n}\ncontext.set(\"previous\", previous);\n\nnode.status({\n  fill: alarms ? \"red\" : warnings ? \"yellow\" : \"green\", shape: \"dot\",\n  text: alarms + \" alarm, \" + warnings + \" warning\"\n});\nreturn [roomMsgs, alertMsgs];\n",
+  "outputs": 2,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 370,
+  "y": 480,
+  "wires": [
+   [
+    "mt4out"
+   ],
+   [
+    "mt4out",
+    "mt4dbg"
+   ]
+  ]
+ },
+ {
+  "id": "mt4out",
+  "type": "mqtt out",
+  "z": "mt4tab",
+  "name": "Publish twin/...",
+  "topic": "",
+  "qos": "0",
+  "retain": "",
+  "respTopic": "",
+  "contentType": "",
+  "userProps": "",
+  "correl": "",
+  "expiry": "",
+  "broker": "mt2broker",
+  "x": 640,
+  "y": 460,
+  "wires": []
+ },
+ {
+  "id": "mt4dbg",
+  "type": "debug",
+  "z": "mt4tab",
+  "name": "Alerts (only when they change)",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 690,
+  "y": 520,
+  "wires": []
+ },
+ {
+  "id": "mt4c5",
+  "type": "comment",
+  "z": "mt4tab",
+  "name": "6. Web address for the dashboard and AI chat",
+  "info": "",
+  "x": 230,
+  "y": 580,
+  "wires": []
+ },
+ {
+  "id": "mt4hin1",
+  "type": "http in",
+  "z": "mt4tab",
+  "name": "",
+  "url": "/twin",
+  "method": "get",
+  "upload": false,
+  "swaggerDoc": "",
+  "x": 140,
+  "y": 620,
+  "wires": [
+   [
+    "mt4hall"
+   ]
+  ]
+ },
+ {
+  "id": "mt4hall",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "Whole building",
+  "func": "// Someone visited http://localhost:1880/twin : hand over the whole building.\nconst twin = flow.get(\"twin\") || {};\nmsg.payload = {\n  building: \"Mini Twin office\",\n  generated: new Date().toISOString(),\n  sources: flow.get(\"health\") || {},\n  rooms: Object.values(twin)\n};\nmsg.headers = { \"Access-Control-Allow-Origin\": \"*\" };\nreturn msg;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 340,
+  "y": 620,
+  "wires": [
+   [
+    "mt4hres"
+   ]
+  ]
+ },
+ {
+  "id": "mt4hin2",
+  "type": "http in",
+  "z": "mt4tab",
+  "name": "",
+  "url": "/twin/:room",
+  "method": "get",
+  "upload": false,
+  "swaggerDoc": "",
+  "x": 150,
+  "y": 680,
+  "wires": [
+   [
+    "mt4hone"
+   ]
+  ]
+ },
+ {
+  "id": "mt4hone",
+  "type": "function",
+  "z": "mt4tab",
+  "name": "One room (any of its names)",
+  "func": "// Someone visited http://localhost:1880/twin/<name>.\n// They can use ANY of the room's names: room3, Meeting Room,\n// AHU-L1-MTG, FLR1-003, Meeting Rm 01 or AST-1003. The table does the matching.\nconst twin = flow.get(\"twin\") || {};\nconst map = flow.get(\"map\") || { rooms: {} };\nconst asked = decodeURIComponent(msg.req.params.room || \"\").trim().toLowerCase();\n\nlet found = null;\nfor (const r of Object.values(map.rooms)) {\n  const names = [r.id, r.name, r.bms, r.cafm_location, r.cafm_name, r.cafm_ahu_asset];\n  if (names.some(n => String(n).toLowerCase() === asked)) { found = r.id; break; }\n}\nmsg.headers = { \"Access-Control-Allow-Origin\": \"*\" };\nif (!found) {\n  msg.statusCode = 404;\n  msg.payload = { error: \"No room called '\" + asked + \"'\", try: Object.keys(map.rooms) };\n} else {\n  msg.payload = { asked: asked, matched: found, sources: flow.get(\"health\") || {}, room: twin[found] };\n}\nreturn msg;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 380,
+  "y": 680,
+  "wires": [
+   [
+    "mt4hres"
+   ]
+  ]
+ },
+ {
+  "id": "mt4hres",
+  "type": "http response",
+  "z": "mt4tab",
+  "name": "Reply",
+  "statusCode": "",
+  "headers": {},
+  "x": 610,
+  "y": 650,
+  "wires": []
+ }
+]
