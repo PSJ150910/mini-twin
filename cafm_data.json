@@ -1,0 +1,29 @@
+{
+  "_about": "Pretend CAFM (repair logbook) starting data for Mini Twin. Note the room names here deliberately differ from the sensors (room1..room6) and the BMS (AHU-L1-...).",
+  "locations": [
+    {"location_code": "FLR1-001", "name": "Front Desk Area",  "floor": "Ground Floor", "area_m2": 24},
+    {"location_code": "FLR1-002", "name": "Open Plan Office", "floor": "Ground Floor", "area_m2": 110},
+    {"location_code": "FLR1-003", "name": "Meeting Rm 01",    "floor": "Ground Floor", "area_m2": 32},
+    {"location_code": "FLR1-004", "name": "Staff Kitchen",    "floor": "Ground Floor", "area_m2": 28},
+    {"location_code": "FLR1-005", "name": "Mgr Office",       "floor": "Ground Floor", "area_m2": 16},
+    {"location_code": "FLR1-006", "name": "Focus Pod",        "floor": "Ground Floor", "area_m2": 9}
+  ],
+  "assets": [
+    {"asset_id": "AST-1001", "description": "Air Handling Unit 1", "category": "HVAC", "location_code": "FLR1-001", "manufacturer": "AirFlow Systems Ltd", "model": "AF-200", "serial_no": "AF200-55871", "installed": "2019-03-14", "last_service": "2026-05-02", "next_service": "2026-11-02", "condition": "Good"},
+    {"asset_id": "AST-1002", "description": "Air Handling Unit 2", "category": "HVAC", "location_code": "FLR1-002", "manufacturer": "AirFlow Systems Ltd", "model": "AF-600", "serial_no": "AF600-10422", "installed": "2019-03-14", "last_service": "2026-05-02", "next_service": "2026-11-02", "condition": "Fair"},
+    {"asset_id": "AST-1003", "description": "Air Handling Unit 3", "category": "HVAC", "location_code": "FLR1-003", "manufacturer": "AirFlow Systems Ltd", "model": "AF-300", "serial_no": "AF300-77310", "installed": "2017-09-01", "last_service": "2026-02-11", "next_service": "2026-08-11", "condition": "Poor"},
+    {"asset_id": "AST-1004", "description": "Air Handling Unit 4", "category": "HVAC", "location_code": "FLR1-004", "manufacturer": "AirFlow Systems Ltd", "model": "AF-300", "serial_no": "AF300-77455", "installed": "2019-03-14", "last_service": "2026-05-03", "next_service": "2026-11-03", "condition": "Good"},
+    {"asset_id": "AST-1005", "description": "Air Handling Unit 5", "category": "HVAC", "location_code": "FLR1-005", "manufacturer": "AirFlow Systems Ltd", "model": "AF-200", "serial_no": "AF200-56002", "installed": "2021-06-20", "last_service": "2026-05-03", "next_service": "2026-11-03", "condition": "Good"},
+    {"asset_id": "AST-1006", "description": "Air Handling Unit 6", "category": "HVAC", "location_code": "FLR1-006", "manufacturer": "AirFlow Systems Ltd", "model": "AF-100", "serial_no": "AF100-30017", "installed": "2021-06-20", "last_service": "2026-05-03", "next_service": "2026-11-03", "condition": "Good"},
+    {"asset_id": "AST-2001", "description": "Fire Extinguisher (CO2)", "category": "Fire Safety", "location_code": "FLR1-004", "manufacturer": "SafeGuard", "model": "CO2-5", "serial_no": "SG-9981", "installed": "2023-01-10", "last_service": "2026-01-15", "next_service": "2027-01-15", "condition": "Good"},
+    {"asset_id": "AST-3001", "description": "Lighting Control Panel", "category": "Electrical", "location_code": "FLR1-002", "manufacturer": "BrightLine", "model": "LCP-12", "serial_no": "BL-4410", "installed": "2019-03-14", "last_service": "2026-04-20", "next_service": "2027-04-20", "condition": "Good"}
+  ],
+  "tickets": [
+    {"ticket_id": 1001, "asset_id": "AST-1003", "type": "Planned", "priority": "P4", "title": "6-monthly service and filter change", "status": "Closed", "reported_by": "Maintenance schedule", "assigned_to": "CoolTech Engineering", "opened": "2026-02-10T09:00:00", "closed": "2026-02-11T15:30:00", "resolution": "Filters replaced. Noted fan bearings starting to wear; recommend replacement within 6 months."},
+    {"ticket_id": 1002, "asset_id": "AST-1003", "type": "Reactive", "priority": "P3", "title": "Meeting Rm 01 too warm in the afternoons", "status": "Closed", "reported_by": "Helpdesk call", "assigned_to": "CoolTech Engineering", "opened": "2026-06-18T14:20:00", "closed": "2026-06-19T11:05:00", "resolution": "Supply fan tripped on overload. Reset and tested OK. Bearings worn; quote raised for replacement."},
+    {"ticket_id": 1003, "asset_id": "AST-1003", "type": "Reactive", "priority": "P2", "title": "Meeting Rm 01 hot and stuffy, unit noisy", "status": "Closed", "reported_by": "Helpdesk call", "assigned_to": "CoolTech Engineering", "opened": "2026-09-03T10:45:00", "closed": "2026-09-03T16:10:00", "resolution": "Fan motor tripped again. Reset. Replacement bearings on order (PO-55120)."},
+    {"ticket_id": 1004, "asset_id": "AST-1002", "type": "Reactive", "priority": "P4", "title": "Squeaking noise from ceiling vent", "status": "Open", "reported_by": "Helpdesk call", "assigned_to": "CoolTech Engineering", "opened": "2026-11-10T08:50:00", "closed": null, "resolution": null},
+    {"ticket_id": 1005, "asset_id": "AST-1003", "type": "Planned", "priority": "P3", "title": "Replace supply fan bearings (overdue service)", "status": "Open", "reported_by": "Maintenance schedule", "assigned_to": "CoolTech Engineering", "opened": "2026-08-11T09:00:00", "closed": null, "resolution": null},
+    {"ticket_id": 1006, "asset_id": "AST-2001", "type": "Planned", "priority": "P4", "title": "Annual extinguisher inspection", "status": "Closed", "reported_by": "Maintenance schedule", "assigned_to": "SafeGuard", "opened": "2026-01-15T09:00:00", "closed": "2026-01-15T10:00:00", "resolution": "Inspected and tagged."}
+  ]
+}

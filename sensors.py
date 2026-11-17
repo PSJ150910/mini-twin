@@ -13,12 +13,18 @@ and evenings without waiting a whole day.
 Every so often one room "breaks" and starts overheating, so later we have
 something interesting for alerts and the AI chat to explain.
 
+Task 3 addition: whenever a room breaks or gets fixed, this program also
+announces it on a behind-the-scenes MQTT channel, "simulation/fault", so the
+pretend BMS (bms_sim.py) and repair logbook (cafm_api.py) can react.
+
 Run it with:   python sensors.py
+Break a room straight away (handy for demos):   python sensors.py --fault room3
 Stop it with:  Ctrl + C
 """
 
 import json
 import random
+import sys
 import time
 from datetime import datetime, timedelta
 
@@ -102,6 +108,13 @@ class Room:
         ]
 
 
+def announce_fault(client, room, stamp):
+    """Tell the other pretend systems which room is broken (None = all fine)."""
+    message = {"room": room.id if room else None, "active": room is not None, "time": stamp}
+    # retain=True means late-joining programs still get the latest news
+    client.publish("simulation/fault", json.dumps(message), qos=1, retain=True)
+
+
 def main():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="mini-twin-sensors")
     try:
@@ -116,6 +129,19 @@ def main():
     rooms = [Room(rid, info) for rid, info in ROOMS.items()]
     pretend_time = datetime.now().replace(hour=7, minute=0, second=0, microsecond=0)
     minutes_per_round = SEND_EVERY_SECONDS * SPEED / 60
+    start_stamp = pretend_time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Demo switch: "python sensors.py --fault room3" breaks room3 straight away
+    forced = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == "--fault" else None
+    if forced and forced in ROOMS:
+        unlucky = next(r for r in rooms if r.id == forced)
+        unlucky.fault_minutes_left = random.randint(60, 180)
+        print(f"  ** FAULT (demo): {unlucky.name} has started overheating! **")
+        announce_fault(client, unlucky, start_stamp)
+    else:
+        if forced:
+            print(f"  (ignoring --fault {forced}: rooms are room1 to room6)")
+        announce_fault(client, None, start_stamp)
 
     try:
         while True:
@@ -128,9 +154,13 @@ def main():
                 unlucky = random.choice(rooms)
                 unlucky.fault_minutes_left = random.randint(60, 180)   # 1 to 3 pretend hours
                 print(f"  ** FAULT: {unlucky.name} has started overheating! **")
+                announce_fault(client, unlucky, stamp)
 
             for room in rooms:
+                was_broken = room.fault_minutes_left > 0
                 room.update(pretend_time.hour, minutes_per_round)
+                if was_broken and room.fault_minutes_left <= 0:
+                    announce_fault(client, None, stamp)
                 for sensor, value, unit in room.readings():
                     topic = f"building/floor1/{room.id}/{sensor}"
                     message = {
@@ -149,6 +179,12 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping the pretend sensors. Bye!")
     finally:
+        # Building switched off: clear any fault so the BMS doesn't stay "broken"
+        try:
+            client.publish("simulation/fault", json.dumps({"room": None, "active": False}),
+                           qos=1, retain=True).wait_for_publish(timeout=2)
+        except (RuntimeError, ValueError):
+            pass   # broker already gone, nothing to tidy
         client.loop_stop()
         client.disconnect()
 
