@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Twin floor plan</title>
+<!--
+  Mini Twin - floor-plan screen (Task 5)
+
+  A drawing of the 6-room office. Every 3 seconds this page asks Node-RED
+  for the combined room records (http://localhost:1880/twin, built in Task 4)
+  and colours each room by its temperature:
+      blue  = cool  (below 20 °C)
+      green = comfortable (20 to 25 °C)
+      red   = hot   (above 25 °C)
+  Click a room to see its live readings, its air machine and its repair
+  history side by side.
+
+  Node-RED serves this page at  http://localhost:1880/floorplan
+  You can also double-click this file to open it; it then asks
+  localhost:1880 directly for the data.
+-->
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --ink: #1d2733; --muted: #5d6b7a; --line: #d5dce3;
+    --cool: #3b82f6; --cool-bg: #dbeafe;
+    --ok: #16a34a;   --ok-bg: #dcfce7;
+    --hot: #dc2626;  --hot-bg: #fee2e2;
+    --none: #94a3b8; --none-bg: #eef1f4;
+    --warn: #b45309; --warn-bg: #fef3c7;
+    --wall: #334155; --floor: #fbfcfd;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+           padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 19px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .sources { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--none-bg); color: var(--muted); }
+  .pill.ok { background: var(--ok-bg); color: #166534; }
+  .pill.bad { background: var(--hot-bg); color: #991b1b; }
+  .pill.wait { background: var(--warn-bg); color: #92400e; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+                         margin-right: 6px; vertical-align: -1px; background: var(--c); }
+
+  svg { width: 100%; height: auto; display: block; }
+  .room { cursor: pointer; }
+  .room rect.fill { stroke: var(--wall); stroke-width: 3; transition: fill .6s; }
+  .room:hover rect.fill { stroke-width: 5; }
+  .room.selected rect.fill { stroke: #0f172a; stroke-width: 6; }
+  .room text { pointer-events: none; fill: var(--ink); }
+  .room .name { font-size: 17px; font-weight: 600; }
+  .room .temp { font-size: 30px; font-weight: 700; }
+  .room .small { font-size: 13px; fill: var(--muted); }
+  .room .badge { font-size: 13px; font-weight: 600; }
+  .room.alarm rect.ring { stroke: var(--hot); stroke-width: 4; fill: none; animation: pulse 1.4s infinite; }
+  .room.warning rect.ring { stroke: var(--warn); stroke-width: 3; fill: none; stroke-dasharray: 8 6; }
+  .room rect.ring { fill: none; stroke: none; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .15; } }
+
+  .panel h2 { margin: 0 0 2px; font-size: 20px; }
+  .panel h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .names { font-size: 12px; color: var(--muted); }
+  .alertbox { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--none-bg); }
+  .alertbox.ok { background: var(--ok-bg); }
+  .alertbox.warning { background: var(--warn-bg); }
+  .alertbox.alarm { background: var(--hot-bg); }
+  .alertbox strong { display: block; margin-bottom: 2px; }
+  .alertbox ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 20px; font-weight: 700; }
+  .tile .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .status { font-weight: 700; }
+  .status.Running { color: var(--ok); } .status.Fault { color: var(--hot); } .status.Off { color: var(--muted); }
+  .ticket { border-left: 4px solid var(--line); padding: 6px 10px; margin-bottom: 8px; background: #fafbfc; border-radius: 0 6px 6px 0; }
+  .ticket.open { border-left-color: var(--hot); }
+  .ticket .t { font-weight: 600; }
+  .ticket .m { font-size: 12px; color: var(--muted); }
+  .ticket .r { font-size: 13px; margin-top: 3px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .hint { color: var(--muted); }
+  .error { background: var(--hot-bg); color: #991b1b; padding: 10px 12px; border-radius: 8px; margin: 12px 20px 0; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Mini Twin: Ground floor</h1>
+    <div class="sub" id="updated">Connecting to Node-RED…</div>
+  </div>
+  <div class="sources" id="sources"></div>
+</header>
+<div class="error" id="error"></div>
+
+<main>
+  <section class="card">
+    <svg id="plan" viewBox="0 0 900 520" role="img" aria-label="Floor plan of the six rooms">
+      <!-- outer walls and corridor -->
+      <rect x="10" y="10" width="880" height="500" fill="var(--floor)" stroke="var(--wall)" stroke-width="6" rx="4"/>
+      <text x="450" y="283" text-anchor="middle" font-size="13" fill="var(--muted)" letter-spacing="4">CORRIDOR</text>
+      <g id="rooms"></g>
+      <!-- the front door, into Reception (drawn last so it sits on top) -->
+      <line x1="10" y1="200" x2="10" y2="240" stroke="var(--bg)" stroke-width="10"/>
+      <text x="22" y="236" font-size="12" fill="var(--muted)" pointer-events="none">⇥ Entrance</text>
+    </svg>
+    <div class="legend">
+      <span style="--c: var(--cool)">Cool, below 20 °C</span>
+      <span style="--c: var(--ok)">Comfortable, 20 to 25 °C</span>
+      <span style="--c: var(--hot)">Hot, above 25 °C</span>
+      <span style="--c: var(--none)">No data yet</span>
+    </div>
+    <p class="hint" style="font-size:13px;margin:8px 0 0">Click a room to see everything about it. A flashing red outline means an alarm, a dashed orange one a warning.</p>
+  </section>
+
+  <section class="card panel" id="panel">
+    <p class="hint">Click a room on the plan.</p>
+  </section>
+</main>
+
+<script>
+// ---------------- Settings you can change ----------------
+const COOL_BELOW = 20;   // °C: below this the room is drawn blue
+const HOT_ABOVE  = 25;   // °C: above this the room is drawn red (same as the Task 4 alert rule)
+const REFRESH_SECONDS = 3;
+// ----------------------------------------------------------
+
+// Where to get the data: the same Node-RED that served this page,
+// or localhost:1880 if this file was opened by double-clicking it.
+const DATA_URL = location.protocol === "file:" ? "http://localhost:1880/twin" : "/twin";
+
+// Where each room sits on the drawing (x, y, width, height), keyed by the
+// one official room ID from Task 4.
+const LAYOUT = {
+  room1: { x: 10,  y: 10,  w: 220, h: 240 },  // Reception, by the entrance
+  room2: { x: 230, y: 10,  w: 420, h: 240 },  // Open Office
+  room5: { x: 650, y: 10,  w: 240, h: 240 },  // Manager Office
+  room3: { x: 10,  y: 310, w: 330, h: 200 },  // Meeting Room
+  room4: { x: 340, y: 310, w: 300, h: 200 },  // Kitchen
+  room6: { x: 640, y: 310, w: 250, h: 200 }   // Quiet Room
+};
+
+let rooms = {};          // latest combined record per room
+let selected = null;     // which room the panel is showing
+
+function band(temp) {
+  if (temp === null || temp === undefined) return { key: "none", label: "No data" };
+  if (temp < COOL_BELOW) return { key: "cool", label: "Cool" };
+  if (temp > HOT_ABOVE)  return { key: "hot",  label: "Hot" };
+  return { key: "ok", label: "Comfortable" };
+}
+
+// Makes text safe to put on the page (so odd characters in a ticket can't break it)
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function num(v, digits) { return v === null || v === undefined || v === "" ? "–" : (digits === undefined ? v : Number(v).toFixed(digits)); }
+function when(iso) { return iso ? String(iso).replace("T", " ").slice(0, 16) : "–"; }
+
+// ---------- Draw the rooms once ----------
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function drawRooms() {
+  const g = document.getElementById("rooms");
+  for (const id in LAYOUT) {
+    const L = LAYOUT[id];
+    const grp = el("g", { class: "room", id: "g-" + id, tabindex: 0, role: "button" }, g);
+    el("rect", { class: "fill", x: L.x, y: L.y, width: L.w, height: L.h, fill: "var(--none-bg)" }, grp);
+    el("rect", { class: "ring", x: L.x + 8, y: L.y + 8, width: L.w - 16, height: L.h - 16, rx: 6 }, grp);
+    const cx = L.x + L.w / 2, cy = L.y + L.h / 2;
+    el("text", { class: "name", x: cx, y: cy - 38, "text-anchor": "middle" }, grp).textContent = id;
+    el("text", { class: "temp", x: cx, y: cy + 4, "text-anchor": "middle" }, grp).textContent = "–";
+    el("text", { class: "small", x: cx, y: cy + 28, "text-anchor": "middle" }, grp).textContent = "";
+    el("text", { class: "badge", x: cx, y: cy + 52, "text-anchor": "middle" }, grp).textContent = "";
+    grp.addEventListener("click", () => select(id));
+    grp.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") select(id); });
+  }
+}
+
+// ---------- Recolour the rooms with the latest data ----------
+function paintRooms() {
+  for (const id in LAYOUT) {
+    const r = rooms[id];
+    const grp = document.getElementById("g-" + id);
+    const [name, temp, small, badge] = grp.querySelectorAll("text");
+    const s = (r && r.summary) || {};
+    const b = band(s.temperature);
+    grp.querySelector("rect.fill").setAttribute("fill", "var(--" + b.key + "-bg)");
+    grp.querySelector("rect.fill").setAttribute("stroke", b.key === "none" ? "var(--wall)" : "var(--" + b.key + ")");
+    grp.classList.toggle("alarm", !!r && r.alert && r.alert.level === "alarm");
+    grp.classList.toggle("warning", !!r && r.alert && r.alert.level === "warning");
+    grp.classList.toggle("selected", selected === id);
+    name.textContent = r ? r.name : id;
+    temp.textContent = s.temperature != null ? num(s.temperature, 1) + " °C" : "–";
+    temp.setAttribute("fill", b.key === "none" ? "var(--muted)" : "var(--" + b.key + ")");
+    small.textContent = s.temperature != null
+      ? b.label + " · " + num(s.occupancy) + " people · CO2 " + num(s.co2) : "Waiting for sensors";
+    const bits = [];
+    if (s.ahu_status === "Fault") bits.push("⚠ Air machine fault");
+    if (s.open_tickets) bits.push("🔧 " + s.open_tickets + " open job" + (s.open_tickets > 1 ? "s" : ""));
+    badge.textContent = bits.join("   ");
+    badge.setAttribute("fill", s.ahu_status === "Fault" ? "var(--hot)" : "var(--warn)");
+  }
+}
+
+// ---------- The side panel for one room ----------
+function select(id) { selected = id; paintRooms(); showPanel(); }
+
+function ticketHtml(t, open) {
+  return '<div class="ticket' + (open ? " open" : "") + '">' +
+    '<div class="t">#' + esc(t.ticket_id) + " " + esc(t.title) + "</div>" +
+    '<div class="m">' + esc(t.type) + " · " + esc(t.priority) + " · " + esc(t.asset) + " · " +
+      (open ? "opened " + esc(when(t.opened)) + " · " + esc(t.assigned_to || "not assigned")
+            : esc(when(t.opened)) + " to " + esc(when(t.closed))) + "</div>" +
+    (t.resolution ? '<div class="r">' + esc(t.resolution) + "</div>" : "") +
+    "</div>";
+}
+
+function showPanel() {
+  const p = document.getElementById("panel");
+  const r = rooms[selected];
+  if (!r) { p.innerHTML = '<p class="hint">Click a room on the plan.</p>'; return; }
+  const s = r.summary || {}, a = r.ahu || {}, sen = r.sensors || {}, al = r.alert || {};
+  const b = band(s.temperature);
+  const levelWord = { ok: "All normal", warning: "Warning", alarm: "ALARM", unknown: "Waiting for data" }[al.level] || "";
+  const reasons = (al.reasons || []).length
+    ? "<ul>" + al.reasons.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "";
+  const open = (r.tickets && r.tickets.open) || [];
+  const hist = (r.tickets && r.tickets.history) || [];
+  const ahuAsset = (r.assets || []).find(x => x.serves_room_air);
+
+  p.innerHTML =
+    "<h2>" + esc(r.name) + "</h2>" +
+    '<div class="names">Also known as: ' + esc(r.ids.sensor) + " (sensors) · " + esc(r.ids.bms) + " (BMS) · " +
+      esc(r.ids.cafm_location) + " / " + esc(r.ids.cafm_name) + " (CAFM)</div>" +
+    '<div class="alertbox ' + esc(al.level) + '"><strong>' + esc(levelWord) + "</strong>" + esc(al.message) + reasons + "</div>" +
+
+    "<h3>Live readings (room sensors)</h3>" +
+    '<div class="tiles">' +
+      '<div class="tile"><div class="k">Temperature</div><div class="v" style="color:var(--' + b.key + ')">' + num(s.temperature, 1) + " <small>°C</small></div></div>" +
+      '<div class="tile"><div class="k">CO2 (stale air)</div><div class="v">' + num(s.co2) + " <small>ppm</small></div></div>" +
+      '<div class="tile"><div class="k">People in room</div><div class="v">' + num(s.occupancy) + "</div></div>" +
+    "</div>" +
+    '<div class="m names" style="margin-top:6px">Sensor time: ' + esc(when(sen.temperature && sen.temperature.time)) +
+      (s.data_fresh ? "" : " · <b>no fresh data</b>") + "</div>" +
+
+    "<h3>Air machine (BMS) " + esc(a.id) + "</h3>" +
+    '<div class="tiles">' +
+      '<div class="tile"><div class="k">Status</div><div class="v status ' + esc(a.status) + '">' + esc(a.status || "–") + "</div></div>" +
+      '<div class="tile"><div class="k">Air it blows in</div><div class="v">' + num(a.supply_temp, 1) + " <small>°C</small></div></div>" +
+      '<div class="tile"><div class="k">Aiming for</div><div class="v">' + num(a.setpoint, 1) + " <small>°C</small></div></div>" +
+      '<div class="tile"><div class="k">Fan speed</div><div class="v">' + num(a.fan_speed, 0) + " <small>%</small></div></div>" +
+      '<div class="tile" style="grid-column: span 2"><div class="k">Alarm message</div><div class="v" style="font-size:15px">' + esc(a.alarm || "None") + "</div></div>" +
+    "</div>" +
+    (ahuAsset ? '<div class="names" style="margin-top:6px">In the CAFM this machine is ' + esc(ahuAsset.asset_id) + " (" + esc(ahuAsset.model) +
+      "), condition " + esc(ahuAsset.condition) + ", last service " + esc(ahuAsset.last_service) + ", next due " + esc(ahuAsset.next_service) + "</div>" : "") +
+
+    "<h3>Repair jobs (CAFM): " + open.length + " open</h3>" +
+    (open.length ? open.map(t => ticketHtml(t, true)).join("") : '<p class="empty">No open jobs.</p>') +
+    "<h3>Repair history</h3>" +
+    (hist.length ? hist.map(t => ticketHtml(t, false)).join("") : '<p class="empty">No past jobs for this room.</p>');
+}
+
+// ---------- Ask Node-RED for fresh data every few seconds ----------
+async function refresh() {
+  const err = document.getElementById("error");
+  try {
+    const res = await fetch(DATA_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error("Node-RED answered " + res.status);
+    const data = await res.json();
+    rooms = {};
+    for (const r of data.rooms || []) rooms[r.id] = r;
+    err.style.display = "none";
+
+    const src = data.sources || {};
+    const names = { sensors: "Sensors", bms: "Air machines (BMS)", cafm: "Repair log (CAFM)" };
+    document.getElementById("sources").innerHTML = Object.keys(names).map(k => {
+      const v = src[k] || "waiting";
+      const cls = v === "ok" ? "ok" : v === "waiting" ? "wait" : "bad";
+      return '<span class="pill ' + cls + '">' + names[k] + ": " + esc(v) + "</span>";
+    }).join("");
+    document.getElementById("updated").textContent = "Live · updated " + new Date().toLocaleTimeString();
+
+    paintRooms();
+    if (selected) showPanel();
+  } catch (e) {
+    err.style.display = "block";
+    err.textContent = "Can't reach Node-RED at " + DATA_URL + ". Is Node-RED running with the Task 4 flow deployed? (" + e.message + ")";
+  }
+}
+
+drawRooms();
+paintRooms();
+refresh();
+setInterval(refresh, REFRESH_SECONDS * 1000);
+</script>
+</body>
+</html>
